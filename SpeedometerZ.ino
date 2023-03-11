@@ -46,6 +46,8 @@ TFT_eSPI tft = TFT_eSPI();  // Invoke library, pins defined in User_Setup.h
 #define BUTTON1PIN 35
 #define BUTTON2PIN 0
 
+#define DEFAULT_SPEED_LIMIT 10
+
 static const int RXPin = 25, TXPin = 26;
 static const uint32_t GPSBaud = 9600;
 
@@ -57,18 +59,7 @@ SoftwareSerial ss(RXPin, TXPin);
 
 int speed = 0;
 int prev_speed = 0;
-
-
-void IRAM_ATTR toggleButton1() {
-  prev_speed = speed;
-  update_speed_label(++speed);
-}
-
-void IRAM_ATTR toggleButton2() {
-  prev_speed = speed;
-
-  update_speed_label(--speed);
-}
+int speed_limit = 10;
 
 struct Infobox {
   int32_t x;
@@ -83,8 +74,37 @@ struct Infobox {
 
 struct Infobox *info_boxes[TOTAL_BOXES] = { NULL };
 struct Infobox *speed_boxes[TOTAL_SPEED_BOXES] = { NULL };
-char *info_box_types[3] = { "gps", "ble", "net" };
+char *info_box_types[3] = { "GPS", "BLE", "NET" };
+int prev_speed_limit = 10;
 
+void IRAM_ATTR toggleButton1() {
+  if (speed_limit < 16) {
+    prev_speed_limit = speed_limit;
+    speed_limit++;
+    clear_speed_limit_border();
+    set_speed_limit_border();
+  }
+}
+
+void IRAM_ATTR toggleButton2() {
+  if (speed_limit > 1) {
+    prev_speed_limit = speed_limit;
+
+    speed_limit--;
+    clear_speed_limit_border();
+    set_speed_limit_border();
+  }
+}
+
+void set_speed_limit_border() {
+  struct Infobox *curr_rect = speed_boxes[speed_limit];
+  tft.drawRect(curr_rect->x - 15, curr_rect->y - 3, curr_rect->w + 2, curr_rect->h + 6, TFT_RED);
+}
+
+void clear_speed_limit_border() {
+  struct Infobox *curr_rect = speed_boxes[prev_speed_limit];
+  tft.drawRect(curr_rect->x - 15, curr_rect->y - 3, curr_rect->w + 2, curr_rect->h + 6, TFT_BLACK);
+}
 
 int calculate_info_box_position() {
   int offset = 10;
@@ -173,7 +193,7 @@ void create_info_boxes(void) {
       BOX_RADIUS,
       TFT_DARKGREY,
       0,
-      get_color(info_box_types[i])
+      TFT_RED
     };
     info_boxes[i] = new Infobox(box);
   }
@@ -205,7 +225,7 @@ void draw_info_boxes(void) {
     struct Infobox *curr_rect = info_boxes[i];
     Serial.println(curr_rect->bg_color);
     tft.fillSmoothRoundRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, curr_rect->radius, curr_rect->bg_color);
-    tft.setCursor(curr_rect->x + 5, curr_rect->y + 5);
+    tft.setCursor(curr_rect->x + 8, curr_rect->y + 5);
 
     if (i < 3) {
       tft.setTextSize(2);
@@ -217,7 +237,13 @@ void draw_info_boxes(void) {
 
 void clear_speed_boxes(void) {
 
+
   tft.fillRect(SPEED_BAR_MARGIN_X, SPEED_BAR_MARGIN_Y, 230, 40, TFT_BLACK);
+}
+
+void clear_info_boxes(void) {
+
+  tft.fillRect(MARGIN_X, MARGIN_Y, 230, 40, TFT_BLACK);
 }
 
 void draw_speed_boxes(void) {
@@ -237,34 +263,70 @@ void draw_speed_boxes_filled(int speed) {
     int lower_bound = i * 10 + 1;
     int upper_bound = (i + 1) * 10;
 
-    if (prev_speed > lower_bound && prev_speed < upper_bound) {
+    if (prev_speed >= lower_bound && prev_speed < upper_bound + 1) {
       struct Infobox *curr_rect = speed_boxes[i];
       tft.fillRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, TFT_BLACK);
       tft.drawRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, curr_rect->bg_color);
     }
 
-    if (speed > lower_bound && speed < upper_bound) {
+    if (speed >= lower_bound && speed < upper_bound + 1) {
       for (int j = 0; j <= i; j++) {
-        struct Infobox *curr_rect = speed_boxes[j];
-        tft.fillRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, TFT_BLACK);
-        tft.fillRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, get_speed_color(speed));
-        tft.setCursor(curr_rect->x + 5, curr_rect->y + 5);
+        if (i > speed_limit) {
+          struct Infobox *curr_rect = speed_boxes[j];
+          tft.fillRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, TFT_BLACK);
+          tft.fillRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, TFT_RED);
+        } else {
+          struct Infobox *curr_rect = speed_boxes[j];
+          tft.fillRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, TFT_BLACK);
+          tft.fillRect(curr_rect->x, curr_rect->y, curr_rect->w, curr_rect->h, get_speed_color(speed));
+        }
       }
     }
   }
 }
 
+
 void update_speed_label(int speed2) {
   speed = speed2;
+
   tft.fillRect(25, 65, 230, 30, TFT_BLACK);
   tft.setCursor(25, 65);
   tft.setTextSize(4);
   tft.setTextColor(TFT_WHITE);
   tft.setTextPadding(100);
-  tft.printf("%i Km/h", speed);
+  tft.setCursor(100, 65);
+  tft.print("Km/h");
+  tft.setCursor(25, 65);
+  tft.printf("%i", speed);
 
   draw_speed_boxes();
   draw_speed_boxes_filled(speed);
+}
+
+void toggle_gps_status(int gps_status) {
+  struct Infobox *box = info_boxes[0];
+
+  if (gps_status == 0 && box->bg_color != TFT_RED) {
+    clear_info_boxes();
+
+    box->bg_color = TFT_RED;
+    Serial.printf("should be disabled %i", gps_status);
+    info_boxes[0] = box;
+    draw_info_boxes();
+    return;
+
+  } else if (gps_status == 1 && box->bg_color != TFT_ORANGE) {
+    clear_info_boxes();
+
+    box->bg_color = TFT_ORANGE;
+    Serial.printf("should be enabled %i", gps_status);
+    info_boxes[0] = box;
+    draw_info_boxes();
+    return;
+
+  } else {
+    return;
+  }
 }
 
 void setup(void) {
@@ -291,20 +353,28 @@ void setup(void) {
   attachInterrupt(BUTTON2PIN, toggleButton2, FALLING);
 
   update_speed_label(speed);
+  toggle_gps_status(0);
+
+  clear_speed_limit_border();
+  set_speed_limit_border();
 }
 
 void loop() {
   // This sketch displays information every time a new sentence is correctly encoded.
-  while (ss.available() > 0)
-    if (gps.encode(ss.read())){
-      speed = gps.speed.kmph();
-      update_speed_label(speed);
-      prev_speed = speed;
+  while (ss.available() > 0) {
+    if (gps.encode(ss.read())) {
+      if (gps.speed.isValid()) {
+        speed = gps.speed.kmph();
+        update_speed_label(speed);
+        prev_speed = speed;
+        toggle_gps_status(1);
+      }
     }
+  }
 
   if (millis() > 5000 && gps.charsProcessed() < 10) {
+    // toggle_gps_status(0);
     Serial.println(F("No GPS detected: check wiring."));
-    while (true)
-      ;
+    toggle_gps_status(0);
   }
 }
